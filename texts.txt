@@ -1,0 +1,32 @@
+# A list of texts for the logo maker.
+# Run it with:   glyphpng.py --bundle NAME --texts texts.txt
+#
+# Each text starts with its [label] - that becomes the file name.
+# One line = one picture; several lines = one picture with several
+# lines. A blank line starts the next text.
+
+[T--E--M--A--I]
+T. E. M. A. I.
+
+[Matemática]
+Matemática
+
+[D--P--T--L]
+D. P. T. L.
+
+[English]
+English
+
+[F--Q]
+F. Q.
+
+[L--C]
+L. C.
+
+[TEMAI-GRUPO-2]
+TEMAI
+GRUPO 2
+
+[logo]
+.
+

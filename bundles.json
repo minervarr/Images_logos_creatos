@@ -1,0 +1,29 @@
+[
+  {
+    "name": "Elegant",
+    "style": "classic",
+    "colors": "mono",
+    "text-color": null,
+    "background": null,
+    "size": 640,
+    "padding": 14
+  },
+  {
+    "name": "ElegantINV",
+    "style": "classic",
+    "colors": "mono-r",
+    "text-color": null,
+    "background": null,
+    "size": 640,
+    "padding": 14
+  },
+  {
+    "name": "Personal",
+    "style": "classic",
+    "colors": "gold",
+    "text-color": null,
+    "background": null,
+    "size": 640,
+    "padding": 14
+  }
+]

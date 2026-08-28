@@ -1,0 +1,22 @@
+[
+  {
+    "name": "whatsapp",
+    "style": "classic",
+    "colors": "mono",
+    "text-color": null,
+    "background": null,
+    "size": 640,
+    "padding": 14,
+    "text": "a\nb\nv"
+  },
+  {
+    "name": "test",
+    "style": "classic",
+    "colors": "mono",
+    "text-color": null,
+    "background": null,
+    "size": 640,
+    "padding": 14,
+    "text": "uno\ndos\ntres\ncuatro\ncinco"
+  }
+]
