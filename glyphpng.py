@@ -16,6 +16,7 @@ compression the PNG format requires.
 """
 import argparse
 import json
+import math
 import os
 import re
 import shlex
@@ -48,6 +49,8 @@ STYLES = [
     ("korean-round", "Korean, rounded",              "unfonts-core/UnDotumBold.ttf"),
     ("brush",        "Brush calligraphy",            "unfonts-core/UnGungseo.ttf"),
     ("handwritten",  "Handwritten",                  "unfonts-core/UnPilgiBold.ttf"),
+    ("terminus",     "Terminus bitmap, 24 px",       "terminus/ter-u24n.otb"),
+    ("terminus-bold","Terminus bitmap, bold",        "terminus/ter-u24b.otb"),
     ("icons",        "Icon symbols",                 "icons/matrix-icons.otf"),
 ]
 STYLE_FILE = {k: v for k, _, v in STYLES}
@@ -70,6 +73,10 @@ class Reader:
         v = self.d[self.p]
         self.p += 1
         return v
+
+    def s8(self):
+        v = self.u8()
+        return v - 256 if v >= 128 else v
 
     def u16(self):
         v = struct.unpack_from(">H", self.d, self.p)[0]
@@ -716,6 +723,88 @@ class Type2:
         self.curveto(x1, y1, x2, y2, x2 + a[4], y2 + a[5])
 
 
+class BitmapFont(Font):
+    """An OTB (bitmap-only OpenType): glyph bitmaps straight from EBDT/EBLC.
+
+    No outlines exist in such a file, so the vector pipeline has nothing to
+    chew on. Instead each glyph serves its scanline bitmap (and its
+    smallGlyphMetrics) at the file's native pixel size; bigger logo sizes
+    come from scaling the finished mask, never from FreeType.
+
+    Index subtable formats 1 (explicit offsets) and 2 (constant-size slots)
+    are covered, which is every layout Terminus .otb files use.
+    """
+
+    def __init__(self, path):
+        Font.__init__(self, path)
+        if "EBLC" not in self.tables or "EBDT" not in self.tables:
+            raise SystemExit(1)
+        self.strikes = []
+        ebdt = self.tables["EBDT"][0]
+        eblc = self.tables["EBLC"][0]
+        r = Reader(self.data, eblc)
+        r.u32()  # version
+        for _ in range(r.u32()):
+            st = r.p
+            idx_off, idx_size, num_idx = r.u32(), r.u32(), r.u32()
+            r.u32()                          # colorRef
+            asc = self.data[st + 16]
+            desc = self.data[st + 17] - 256 if self.data[st + 17] >= 128 \
+                else self.data[st + 17]
+            start_g, end_g = Reader(self.data, st + 40).u16(), 0
+            end_g = Reader(self.data, st + 42).u16()
+            r.seek(st + 48)
+            ranges = []
+            for k in range(num_idx):
+                s = Reader(self.data, eblc + idx_off + 8 * k)
+                first, last = s.u16(), s.u16()
+                sub = eblc + idx_off + s.u32()
+                s = Reader(self.data, sub)
+                index_fmt, image_fmt = s.u16(), s.u16()
+                image_off = s.u32()
+                if index_fmt not in (1, 2):
+                    continue
+                slots = []
+                if index_fmt == 2:
+                    image_size = s.u32()
+                    for g in range(first, last + 1):
+                        slots.append(ebdt + image_off + image_size * (g - first))
+                else:
+                    for g in range(first, last + 1):
+                        slots.append(ebdt + image_off + s.u32())
+                ranges.append({"first": first, "last": last,
+                               "image_fmt": image_fmt, "slots": slots})
+            self.strikes.append({"cell": asc - desc, "asc": asc,
+                                 "desc": desc, "ranges": ranges})
+
+    def pick_strike(self, box):
+        """The strike whose cell height sits closest to the render box.
+
+        `box` is the same inner box the vector path fills; ties keep the
+        first strike seen. Returns None if the file serves no strikes.
+        """
+        best = None
+        for st in self.strikes:
+            for rng in st["ranges"]:
+                cand = (abs(st["cell"] - box), st, rng)
+                if best is None or cand[0] < best[0]:
+                    best = cand
+        return best
+
+    def bitmap(self, st, rng, g):
+        """(rows, w, h, bx, by, adv) for a gid, or None if out of range."""
+        if not (rng["first"] <= g <= rng["last"]):
+            return None
+        off = rng["slots"][g - rng["first"]]
+        r = Reader(self.data, off)
+        h, w, bx, by, adv = r.u8(), r.u8(), r.s8(), r.s8(), r.u8()
+        if rng["image_fmt"] != 1 or w <= 0 or h <= 0:
+            return (b"", w, h, bx, by, adv)
+        rowsz = (w + 7) // 8
+        rows = self.data[off + 5:off + 5 + rowsz * h]
+        return (rows, w, h, bx, by, adv)
+
+
 # ------------------------------------------------------------------ rasterizer
 
 def rasterize(contours, width, height, ss=4):
@@ -950,6 +1039,8 @@ def layout(font, text, line_spacing=1.25):
 
 
 def render(text, font_path, size, fg, bg, margin):
+    if is_bitmap_font(font_path):
+        return render_bitmap(text, font_path, size, fg, bg, margin)
     font = Font(font_path)
     shapes = layout(font, text)
     if not shapes:
@@ -993,6 +1084,146 @@ def render(text, font_path, size, fg, bg, margin):
                 px[j + 2] = int((bb * (ba / 255.0) * u + fb * t) / oa)
                 px[j + 3] = int(oa * 255 + 0.5)
     return px
+
+
+def render_bitmap(text, font_path, size, fg, bg, margin):
+    """render() for bitmap-only OTB faces: EBDT strikes instead of outlines.
+
+    The glyphs are placed at the file's native pixel size, blitted into one
+    1-bit mask, and that mask is nearest-neighbour scaled into the very same
+    inner box the vector path fills, so both styles obey --size and
+    --padding identically. The color compose loop below is the vector one,
+    verbatim, with coverage coming from the mask.
+    """
+    font = BitmapFont(font_path)
+    if not font.strikes:
+        raise SystemExit(1)
+
+    text = text.replace("\t", "    ")
+    missing = []
+    picked = font.pick_strike(size * (1.0 - 2 * margin))
+    if picked is None:
+        raise SystemExit(1)
+    _, strike, rng = picked
+    cell = strike["cell"]
+    line_height = cell * 1.25
+
+    space = font.gid(" ")
+    space_bm = font.bitmap(strike, rng, space) if space else None
+    space_adv = (space_bm[5] if space_bm else 0) or cell // 3
+
+    rects = []   # (x, by, g, w, h): x = pen + bearingX, by = bearingY up
+    pen_rows = []
+    for line in text.split("\n"):
+        pen = 0.0
+        for ch in line:
+            if ch == " ":
+                pen += space_adv
+                continue
+            g = font.gid(ch)
+            if g == 0 and ch not in font.cmap:
+                if ch not in missing:
+                    missing.append(ch)
+                continue
+            bm = font.bitmap(strike, rng, g)
+            if bm is None:
+                if ch not in missing:
+                    missing.append(ch)
+                continue
+            _, w, h, bx, by, adv = bm
+            if w > 0 and h > 0:
+                rects.append((pen + bx, by, g, w, h))
+            pen += adv
+        pen_rows.append((rects, pen))
+        rects = []
+
+    # resolve per-row vertical placement now that row indices exist
+    placed = []
+    for i, (row_rects, width) in enumerate(pen_rows):
+        dx = -width / 2.0
+        baseline = i * line_height
+        for (x, by, g, w, h) in row_rects:
+            placed.append((x + dx, baseline - by, g, w, h))
+
+    if missing:
+        say("Note: this style has no drawing for %s, so it was left out."
+            % " ".join(repr(c) for c in missing))
+    if not placed:
+        raise SystemExit(1)
+
+    # one 1-bit mask at strike resolution, bounds from the rounded rects
+    cells = []
+    for (x, y, g, w, h) in placed:
+        gx, gy = int(math.floor(x + 0.5)), int(math.floor(y + 0.5))
+        cells.append((gx, gy, g, w, h))
+    min_x = min(c[0] for c in cells)
+    min_y = min(c[1] for c in cells)
+    bw = max(c[0] + c[3] for c in cells) - min_x
+    bh = max(c[1] + c[4] for c in cells) - min_y
+    mask = bytearray(bw * bh)
+    for (gx, gy, g, w, h) in cells:
+        rows, _, _, _, _, _ = font.bitmap(strike, rng, g)
+        rowsz = (w + 7) // 8
+        for r in range(h):
+            orow = rows[r * rowsz:(r + 1) * rowsz]
+            base = (gy - min_y + r) * bw + (gx - min_x)
+            for c in range(w):
+                if orow[c // 8] >> (7 - (c % 8)) & 1:
+                    mask[base + c] = 255
+
+    # nearest-neighbour into the same inner box the vector path fills
+    w, h = bw, bh
+    box = size * (1.0 - 2 * margin)
+    scale = box / max(w, h)
+    tw = max(int(w * scale + 0.5), 1)
+    th = max(int(h * scale + 0.5), 1)
+    ox = (size - tw) // 2
+    oy = (size - th) // 2
+    cov = bytearray(size * size)
+    for ty in range(th):
+        sy = ty * bh // th
+        srow = sy * bw
+        orow = (oy + ty) * size + ox
+        for tx in range(tw):
+            if mask[srow + tx * bw // tw]:
+                cov[orow + tx] = 255
+
+    br, bgc, bb, ba = bg if bg else (fg[0], fg[1], fg[2], 0)
+    fr, fgc, fb, fa = fg
+    px = bytearray(size * size * 4)
+    for i in range(size * size):
+        a = cov[i]
+        j = i * 4
+        if a == 0:
+            px[j:j + 4] = bytes((br, bgc, bb, ba))
+        elif a == 255 and fa == 255:
+            px[j:j + 4] = bytes((fr, fgc, fb, 255))
+        else:
+            t = a / 255.0 * (fa / 255.0)
+            u = 1 - t
+            oa = ba / 255.0 * u + t
+            if oa <= 0:
+                px[j:j + 4] = b"\0\0\0\0"
+            else:
+                px[j] = int((br * (ba / 255.0) * u + fr * t) / oa)
+                px[j + 1] = int((bgc * (ba / 255.0) * u + fgc * t) / oa)
+                px[j + 2] = int((bb * (ba / 255.0) * u + fb * t) / oa)
+                px[j + 3] = int(oa * 255 + 0.5)
+    return px
+
+
+def is_bitmap_font(font_path):
+    """True when the sfnt table directory lists an EBDT table."""
+    with open(font_path, "rb") as fh:
+        head = fh.read(12 + 16 * 512)
+    num = struct.unpack_from(">H", head, 4)[0]
+    for i in range(num):
+        off = 12 + 16 * i
+        if off + 16 > len(head):
+            break
+        if head[off:off + 4] == b"EBDT":
+            return True
+    return False
 
 
 # ------------------------------------------------------- lists of logos

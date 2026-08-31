@@ -1,2 +1,28 @@
 __pycache__/
 *.pyc
+
+# Build trees
+build/
+/android/.gradle/
+/android/build/
+/android/app/build/
+# The NDK's per-variant build tree lives under app/, not at android/.
+/android/app/.cxx/
+/android/.cxx/
+/android/local.properties
+
+# Generated into the APK by android/CMakeLists.txt (file(COPY ...)) from the
+# repo's own assets/. Tracking these duplicates ~125 MB of fonts already
+# checked in one directory up.
+/android/app/src/main/assets/fonts/
+/android/app/src/main/assets/shaders/
+
+# Signing material -- never commit
+*.jks
+*.keystore
+keystore.properties
+
+# Editor / tooling
+compile_commands.json
+.clangd/
+.cache/

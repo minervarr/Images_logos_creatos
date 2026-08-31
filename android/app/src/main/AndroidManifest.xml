@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application android:label="Images Logos Creator">
+        <!-- AppShellActivity (not plain NativeActivity): text input needs its
+             off-screen EditText - the IME mirrors the field's whole buffer down
+             through AppView::onTextEditPortable, which the logo text field
+             consumes. See framework/app_shell/platform/android/java. -->
+        <activity
+            android:name="io.nava.imageslogoscreator.MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:label="Images Logos Creator">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="imageslogoscreator" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

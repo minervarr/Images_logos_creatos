@@ -1,0 +1,92 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "io.nava.imageslogoscreator"
+
+    lint {
+        disable 'ExpiredTargetSdkVersion'
+    }
+
+    compileSdkVersion 36
+    ndkVersion "29.0.14206865"
+
+    defaultConfig {
+        applicationId "io.nava.imageslogoscreator"
+        minSdkVersion 26
+        targetSdkVersion 36
+        versionCode 1
+        versionName "0.1.0"
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_BUILD_TYPE=Release"
+            }
+        }
+    }
+
+    // armeabi-v7a, arm64-v8a and x86_64, one APK each (universalApk false):
+    // the three phones/emulators this app ships for, nothing else bundled.
+    splits {
+        abi {
+            enable true
+            reset()
+            include "armeabi-v7a", "arm64-v8a", "x86_64"
+            universalApk false
+        }
+    }
+
+    signingConfigs {
+        // The same key Matrix Player signs with (see that repo's
+        // android/app/build.gradle): one keystore, bruno.jks, travels with
+        // every app this machine ships.
+        release {
+            storeFile file("../bruno.jks")
+            storePassword "Tetas//2004//"
+            keyAlias "brunoKey"
+            keyPassword "Tetas//2004//"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            // The debug build carries the headless capture mode: launch with
+            //   adb shell am start -n io.nava.imageslogoscreator/.MainActivity \
+            //       --es il_capture capture
+            // and the app renders its UI states off-screen (present
+            // suppressed), writes PNGs to its external files dir and exits.
+            // scripts/android/capture.sh drives the whole round trip.
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "../CMakeLists.txt"
+        }
+    }
+
+    sourceSets {
+        main {
+            // AppShellActivity lives in app_shell; the JNI symbols encode the
+            // declaring class, so they resolve for our subclass (MainActivity).
+            java.srcDirs += '../../framework/app_shell/platform/android/java'
+        }
+    }
+}
+
+// android/CMakeLists.txt's vce_compile_slang()/asset staging write into
+// app/src/main/assets/ as a side effect of the native build. AGP's
+// asset-merge tasks only track declared source-set inputs, so without this
+// ordering the merge can run (and cache as up-to-date) before CMake has
+// produced anything, and the shaders/fonts silently never reach the APK.
+afterEvaluate {
+    def nativeBuildTasks = tasks.matching { it.name.startsWith("buildCMake") }
+    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+        dependsOn nativeBuildTasks
+    }
+}
