@@ -44,6 +44,9 @@ file(COPY ${REPO_ROOT}/assets/shaders_prebuilt/ DESTINATION ${ILC_ANDROID_ASSETS
 # Fonts: the same tree the desktop stages beside the exe, but inside the APK;
 # AndroidAssetReader serves them through the Host::dataReader seam.
 file(COPY ${REPO_ROOT}/assets/fonts/ DESTINATION ${ILC_ANDROID_ASSETS}/fonts)
+# The icon face is artwork, not a typeface, so it is not in the shared fonts
+# submodule — but it has to land in the same fonts/ root the reader serves.
+file(COPY ${REPO_ROOT}/assets/icons/ DESTINATION ${ILC_ANDROID_ASSETS}/fonts/icons)
 
 # The app. logo_view.cc is the whole UI - no OS header in it - so the Android
 # library compiles the SAME file the desktop exe does, plus this folder's

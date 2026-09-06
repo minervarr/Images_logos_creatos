@@ -19,7 +19,11 @@ target_link_libraries(imageslogoscreator PRIVATE
 add_dependencies(imageslogoscreator ${IL_SHADER_TARGETS})
 
 # A build tree is one self-contained folder (app_paths' rule): the fonts, the
-# shader SPIR-V and the bundle presets all sit beside the exe. The logo PNGs
+# shader SPIR-V and the bundle presets all sit beside the exe. The typefaces
+# come from the shared `fonts` submodule at assets/fonts; the icon face is
+# per-app artwork kept at assets/icons, and is staged INTO fonts/icons so the
+# style table in core/glyphpng_core.cpp still resolves "icons/matrix-icons.otf"
+# against one font root. The logo PNGs
 # the app writes go to <exe dir>/pictures, exactly like the CLI's own rule.
 # Dependency-driven (not POST_BUILD): a shader recompile must re-stage even
 # when the executable itself doesn't relink.
@@ -27,6 +31,9 @@ add_custom_target(stage_app_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/assets/fonts
         $<TARGET_FILE_DIR:imageslogoscreator>/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/assets/icons
+        $<TARGET_FILE_DIR:imageslogoscreator>/fonts/icons
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${IL_SHADER_DIR}
         $<TARGET_FILE_DIR:imageslogoscreator>/assets/shaders
@@ -55,6 +62,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/assets/fonts
             $<TARGET_FILE_DIR:ilc_ui_capture>/fonts
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/assets/icons
+            $<TARGET_FILE_DIR:ilc_ui_capture>/fonts/icons
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${IL_SHADER_DIR}
             $<TARGET_FILE_DIR:ilc_ui_capture>/assets/shaders
